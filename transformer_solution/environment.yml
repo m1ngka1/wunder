@@ -1,0 +1,10 @@
+name: wunder2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch>=2.2
+  - numpy
+  - pandas
+  - pyarrow
+  - tqdm
