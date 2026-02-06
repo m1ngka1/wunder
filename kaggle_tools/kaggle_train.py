@@ -6,12 +6,16 @@ import zipfile
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR
+WORK_ROOT = Path("/kaggle/working/wunder_kernel_src")
+PROJECT_ROOT = WORK_ROOT
+EMBEDDED_FILES = {}
+DEFAULT_DATA_DIR = ""
 
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-
-from train import TrainConfig, train  # noqa: E402
+def _materialize_embedded_files(project_root: Path) -> None:
+    for relative_path, content in EMBEDDED_FILES.items():
+        path = project_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -28,13 +32,29 @@ def _env_str(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def main() -> None:
+    PROJECT_ROOT.mkdir(parents=True, exist_ok=True)
+    _materialize_embedded_files(PROJECT_ROOT)
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.append(str(PROJECT_ROOT))
+
+    from train import TrainConfig, train  # noqa: E402
+
     data_root = os.environ.get("WUNDER_DATA_DIR")
     config_path = CURRENT_DIR / "kaggle_train_config.json"
     if not data_root and config_path.exists():
         with config_path.open("r", encoding="utf-8") as handle:
             config = json.load(handle)
         data_root = config.get("data_dir")
+    if not data_root and DEFAULT_DATA_DIR:
+        data_root = DEFAULT_DATA_DIR
 
     if not data_root:
         raise RuntimeError(
@@ -68,6 +88,7 @@ def main() -> None:
         seed=_env_int("WUNDER_SEED", 42),
         device=_env_str("WUNDER_DEVICE", "cuda"),
         num_workers=_env_int("WUNDER_NUM_WORKERS", 2),
+        skip_validation=_env_bool("WUNDER_SKIP_VALIDATION", True),
     )
 
     train(cfg)

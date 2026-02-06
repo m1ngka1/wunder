@@ -15,6 +15,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODEL_DIR="${MODEL_DIR:-transformer_solution}"
 MODEL_PATH="${REPO_ROOT}/${MODEL_DIR}"
+KAGGLE_PYTHON_BIN="${KAGGLE_PYTHON_BIN:-python}"
+
+kaggle_cli() {
+  "${KAGGLE_PYTHON_BIN}" -m kaggle.cli "$@"
+}
 
 if [[ ! -d "${MODEL_PATH}" ]]; then
   echo "MODEL_DIR does not exist: ${MODEL_DIR}" >&2
@@ -27,6 +32,9 @@ STAGING_DIR="${SCRIPT_DIR}/staging"
 rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}"
 export STAGING_DIR
+export SCRIPT_DIR
+export REPO_ROOT
+export PROJECT_ROOT
 
 cp "${SCRIPT_DIR}/kaggle_train.py" "${STAGING_DIR}/kaggle_train.py"
 cp "${PROJECT_ROOT}/train.py" "${STAGING_DIR}/train.py"
@@ -64,6 +72,27 @@ if dataset:
 output_path = Path(os.environ["STAGING_DIR"]) / "kernel-metadata.json"
 output_path.write_text(json.dumps(metadata, indent=2))
 
+staging_dir = Path(os.environ["STAGING_DIR"])
+project_root = Path(os.environ["PROJECT_ROOT"])
+repo_root = Path(os.environ["REPO_ROOT"])
+
+files_to_embed = {
+    "train.py": (project_root / "train.py").read_text(encoding="utf-8"),
+    "model.py": (project_root / "model.py").read_text(encoding="utf-8"),
+    "feature_engineering.py": (project_root / "feature_engineering.py").read_text(
+        encoding="utf-8"
+    ),
+    "solution.py": (project_root / "solution.py").read_text(encoding="utf-8"),
+    "utils.py": (repo_root / "utils.py").read_text(encoding="utf-8"),
+}
+
+kaggle_train_path = staging_dir / "kaggle_train.py"
+kaggle_train_template = kaggle_train_path.read_text(encoding="utf-8")
+kaggle_train_filled = kaggle_train_template.replace(
+    "EMBEDDED_FILES = {}", f"EMBEDDED_FILES = {files_to_embed!r}", 1
+)
+kaggle_train_path.write_text(kaggle_train_filled, encoding="utf-8")
+
 data_slug = None
 if competition:
     data_slug = competition
@@ -74,9 +103,13 @@ if data_slug:
     config = {"data_dir": f"/kaggle/input/{data_slug}"}
     config_path = Path(os.environ["STAGING_DIR"]) / "kaggle_train_config.json"
     config_path.write_text(json.dumps(config, indent=2))
+    kaggle_train_filled = kaggle_train_filled.replace(
+        'DEFAULT_DATA_DIR = ""', f'DEFAULT_DATA_DIR = "/kaggle/input/{data_slug}"', 1
+    )
+    kaggle_train_path.write_text(kaggle_train_filled, encoding="utf-8")
 PY
 
-kaggle kernels push -p "${STAGING_DIR}"
+kaggle_cli kernels push -p "${STAGING_DIR}"
 
 cat <<INFO
 Kernel pushed. Monitor status with:

@@ -19,11 +19,32 @@ Set these before running the scripts:
 - Optional: `KAGGLE_KERNEL_TITLE` to override the kernel display title.
 - Optional: `MODEL_DIR` to choose which solution folder to stage (defaults to `transformer_solution`).
 - Optional: `WUNDER_*` environment variables can override training hyperparameters (e.g. `WUNDER_EPOCHS=12`).
+- Optional: `WUNDER_SKIP_VALIDATION=1` to skip validation during long runs (enabled by default in `kaggle_train.py`).
+
+## Upload train/valid parquet once as a Kaggle dataset
+
+To avoid re-uploading parquet files for every kernel push:
+
+```bash
+cd kaggle_tools
+export KAGGLE_DATASET_ID="mingkaijia/wunder-train-valid-parquet"
+./push_dataset.sh
+```
+
+Then use this dataset in training pushes:
+
+```bash
+export KAGGLE_DATASET="mingkaijia/wunder-train-valid-parquet"
+```
 
 ## Push + run training on Kaggle
 
 ```bash
 cd kaggle_tools
+export KAGGLE_KERNEL_ID="mingkaijia/wunder-transformer-train"
+export KAGGLE_DATASET="mingkaijia/wunder-train-valid-parquet"
+export WUNDER_EPOCHS=50
+export WUNDER_SKIP_VALIDATION=1
 ./push_kernel.sh
 ```
 

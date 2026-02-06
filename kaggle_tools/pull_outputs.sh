@@ -8,10 +8,15 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/../kaggle_outputs"
+KAGGLE_PYTHON_BIN="${KAGGLE_PYTHON_BIN:-python}"
+
+kaggle_cli() {
+  "${KAGGLE_PYTHON_BIN}" -m kaggle.cli "$@"
+}
 
 mkdir -p "${OUTPUT_DIR}"
 
-kaggle kernels output "${KAGGLE_KERNEL_ID}" -p "${OUTPUT_DIR}"
+kaggle_cli kernels output "${KAGGLE_KERNEL_ID}" -p "${OUTPUT_DIR}"
 
 if [[ -f "${OUTPUT_DIR}/solution.zip" ]]; then
   unzip -o "${OUTPUT_DIR}/solution.zip" -d "${OUTPUT_DIR}/solution_unpacked"
