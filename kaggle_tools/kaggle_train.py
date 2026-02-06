@@ -10,6 +10,7 @@ WORK_ROOT = Path("/kaggle/working/wunder_kernel_src")
 PROJECT_ROOT = WORK_ROOT
 EMBEDDED_FILES = {}
 DEFAULT_DATA_DIR = ""
+DEFAULT_ENV_OVERRIDES = {}
 
 def _materialize_embedded_files(project_root: Path) -> None:
     for relative_path, content in EMBEDDED_FILES.items():
@@ -40,6 +41,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def main() -> None:
+    for key, value in DEFAULT_ENV_OVERRIDES.items():
+        os.environ.setdefault(key, str(value))
+
     PROJECT_ROOT.mkdir(parents=True, exist_ok=True)
     _materialize_embedded_files(PROJECT_ROOT)
     if str(PROJECT_ROOT) not in sys.path:

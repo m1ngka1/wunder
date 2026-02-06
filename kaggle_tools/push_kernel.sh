@@ -91,6 +91,12 @@ kaggle_train_template = kaggle_train_path.read_text(encoding="utf-8")
 kaggle_train_filled = kaggle_train_template.replace(
     "EMBEDDED_FILES = {}", f"EMBEDDED_FILES = {files_to_embed!r}", 1
 )
+
+wunder_overrides = {k: v for k, v in os.environ.items() if k.startswith("WUNDER_")}
+kaggle_train_filled = kaggle_train_filled.replace(
+    "DEFAULT_ENV_OVERRIDES = {}", f"DEFAULT_ENV_OVERRIDES = {wunder_overrides!r}", 1
+)
+
 kaggle_train_path.write_text(kaggle_train_filled, encoding="utf-8")
 
 data_slug = None
