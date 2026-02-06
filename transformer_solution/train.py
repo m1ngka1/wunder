@@ -106,20 +106,38 @@ def read_and_reshape(path: str, max_seqs: int | None = None):
     return feat, tgt
 
 
+def weighted_pearson_loss(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
+    y_pred = torch.clamp(y_pred, -6.0, 6.0)
+    weights = torch.abs(y_true).clamp_min(1e-8)
+    sum_w = weights.sum(dim=0)
+
+    mean_true = (y_true * weights).sum(dim=0) / sum_w
+    mean_pred = (y_pred * weights).sum(dim=0) / sum_w
+
+    dev_true = y_true - mean_true
+    dev_pred = y_pred - mean_pred
+
+    cov = (weights * dev_true * dev_pred).sum(dim=0) / sum_w
+    var_true = (weights * dev_true.pow(2)).sum(dim=0) / sum_w
+    var_pred = (weights * dev_pred.pow(2)).sum(dim=0) / sum_w
+
+    corr = cov / (torch.sqrt(var_true) * torch.sqrt(var_pred) + 1e-8)
+    return -corr.mean()
+
+
 def evaluate(model: nn.Module, loader: DataLoader, device: torch.device):
     model.eval()
-    mse_sum = 0.0
+    loss_sum = 0.0
     n = 0
     with torch.no_grad():
-        for x, y, w in loader:
+        for x, y, _ in loader:
             x = x.to(device)
             y = y.to(device)
-            w = w.to(device)
             pred = model(x)
-            loss = ((pred - y) ** 2 * w).mean()
-            mse_sum += loss.item() * x.size(0)
+            loss = weighted_pearson_loss(y, pred)
+            loss_sum += loss.item() * x.size(0)
             n += x.size(0)
-    return mse_sum / max(n, 1)
+    return loss_sum / max(n, 1)
 
 
 def train(cfg: TrainConfig):
@@ -179,14 +197,13 @@ def train(cfg: TrainConfig):
         model.train()
         running = 0.0
         seen = 0
-        for x, y, w in train_loader:
+        for x, y, _ in train_loader:
             x = x.to(device)
             y = y.to(device)
-            w = w.to(device)
 
             optimizer.zero_grad(set_to_none=True)
             pred = model(x)
-            loss = ((pred - y) ** 2 * w).mean()
+            loss = weighted_pearson_loss(y, pred)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -198,7 +215,10 @@ def train(cfg: TrainConfig):
         train_loss = running / max(seen, 1)
         val_loss = evaluate(model, valid_loader, device)
 
-        print(f"epoch={epoch:02d} train_weighted_mse={train_loss:.6f} valid_weighted_mse={val_loss:.6f}")
+        print(
+            f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
+            f"valid_weighted_pearson_loss={val_loss:.6f}"
+        )
         if val_loss < best_val:
             best_val = val_loss
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
