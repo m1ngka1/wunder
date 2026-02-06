@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
+PROJECT_ROOT = CURRENT_DIR
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
@@ -91,7 +91,7 @@ def main() -> None:
     ]:
         shutil.copy2(PROJECT_ROOT / filename, output_dir / filename)
 
-    utils_path = PROJECT_ROOT.parent / "utils.py"
+    utils_path = PROJECT_ROOT / "utils.py"
     if utils_path.exists():
         shutil.copy2(utils_path, output_dir / "utils.py")
 

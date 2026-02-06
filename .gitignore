@@ -10,5 +10,5 @@ __pycache__/
 .DS_Store
 
 # Kaggle tooling outputs
-transformer_solution/kaggle_tools/staging/
-transformer_solution/kaggle_outputs/
+kaggle_tools/staging/
+kaggle_outputs/

@@ -12,8 +12,16 @@ if [[ -z "${KAGGLE_COMPETITION:-}" && -z "${KAGGLE_DATASET:-}" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-REPO_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MODEL_DIR="${MODEL_DIR:-transformer_solution}"
+MODEL_PATH="${REPO_ROOT}/${MODEL_DIR}"
+
+if [[ ! -d "${MODEL_PATH}" ]]; then
+  echo "MODEL_DIR does not exist: ${MODEL_DIR}" >&2
+  exit 1
+fi
+
+PROJECT_ROOT="$(cd "${MODEL_PATH}" && pwd)"
 STAGING_DIR="${SCRIPT_DIR}/staging"
 
 rm -rf "${STAGING_DIR}"

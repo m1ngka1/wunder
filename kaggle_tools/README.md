@@ -1,6 +1,8 @@
 # Kaggle GPU workflow (Transformer)
 
-This folder provides scripts to push the Transformer training code to Kaggle, run training on a GPU, and pull back trained artifacts for submission.
+This folder provides scripts to push a solution's training code to Kaggle, run training on a GPU, and pull back trained artifacts for submission.
+
+By default, the scripts stage `train.py`, `model.py`, `feature_engineering.py`, and `solution.py` from the selected `MODEL_DIR`. If your future solution uses different filenames, update the scripts accordingly.
 
 ## Prerequisites
 
@@ -15,12 +17,13 @@ Set these before running the scripts:
 - `KAGGLE_COMPETITION`: Competition slug that hosts the dataset (e.g. `wunder-challenge-2`).
   - Alternatively, set `KAGGLE_DATASET` to a Kaggle dataset slug if you uploaded the data as a dataset.
 - Optional: `KAGGLE_KERNEL_TITLE` to override the kernel display title.
+- Optional: `MODEL_DIR` to choose which solution folder to stage (defaults to `transformer_solution`).
 - Optional: `WUNDER_*` environment variables can override training hyperparameters (e.g. `WUNDER_EPOCHS=12`).
 
 ## Push + run training on Kaggle
 
 ```bash
-cd transformer_solution/kaggle_tools
+cd kaggle_tools
 ./push_kernel.sh
 ```
 
@@ -31,20 +34,20 @@ The push script also writes `kaggle_train_config.json` so the kernel knows which
 ## Pull trained artifacts back
 
 ```bash
-cd transformer_solution/kaggle_tools
+cd kaggle_tools
 ./pull_outputs.sh
 ```
 
-This downloads the latest kernel outputs into `transformer_solution/kaggle_outputs/`.
+This downloads the latest kernel outputs into `kaggle_outputs/`.
 
 If you want to sync the artifacts back into the main transformer solution folder for local inference or packaging, set:
 
 ```bash
-export WUNDER_SYNC_DIR="../"
+export WUNDER_SYNC_DIR="../transformer_solution"
 ./pull_outputs.sh
 ```
 
-That will copy the trained artifacts into `transformer_solution/`.
+That will copy the trained artifacts into the chosen solution directory.
 
 ## Notes
 
