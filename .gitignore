@@ -8,3 +8,7 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Kaggle tooling outputs
+transformer_solution/kaggle_tools/staging/
+transformer_solution/kaggle_outputs/

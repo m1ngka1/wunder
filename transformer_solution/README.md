@@ -59,3 +59,7 @@ From inside `transformer_solution/`:
 ```bash
 zip -r ../solution.zip .
 ```
+
+## Kaggle GPU training
+
+For GPU training on Kaggle, see `transformer_solution/kaggle_tools/README.md`. It includes scripts to push the latest training code, run a kernel, and pull back trained artifacts.
