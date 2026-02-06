@@ -82,22 +82,27 @@ def main() -> None:
         dim_feedforward=_env_int("WUNDER_DIM_FEEDFORWARD", 256),
         dropout=_env_float("WUNDER_DROPOUT", 0.1),
         batch_size=_env_int("WUNDER_BATCH_SIZE", 256),
-        epochs=_env_int("WUNDER_EPOCHS", 8),
+        epochs=_env_int("WUNDER_EPOCHS", 3),
         lr=_env_float("WUNDER_LR", 2e-4),
         weight_decay=_env_float("WUNDER_WEIGHT_DECAY", 1e-4),
         seed=_env_int("WUNDER_SEED", 42),
         device=_env_str("WUNDER_DEVICE", "cuda"),
         num_workers=_env_int("WUNDER_NUM_WORKERS", 2),
         skip_validation=_env_bool("WUNDER_SKIP_VALIDATION", True),
+        log_interval=_env_int("WUNDER_LOG_INTERVAL", 100),
+        early_stopping_patience=_env_int("WUNDER_EARLY_STOPPING_PATIENCE", 3),
+        early_stopping_min_delta=_env_float("WUNDER_EARLY_STOPPING_MIN_DELTA", 0.0),
     )
 
     train(cfg)
 
     artifacts = [
         "transformer_model.pt",
+        "transformer_training_bundle.pt",
         "feature_stats.npz",
         "config.npz",
         "train_config.json",
+        "train_history.json",
     ]
 
     for filename in artifacts:
