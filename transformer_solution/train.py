@@ -39,6 +39,7 @@ class TrainConfig:
     seed: int
     device: str
     num_workers: int
+    skip_validation: bool
 
 
 class SequenceWindowDataset(Dataset):
@@ -145,20 +146,24 @@ def train(cfg: TrainConfig):
     set_seed(cfg.seed)
 
     train_feat, train_tgt = read_and_reshape(cfg.train_path, cfg.max_train_seqs)
-    valid_feat, valid_tgt = read_and_reshape(cfg.valid_path, cfg.max_valid_seqs)
+    if not cfg.skip_validation:
+        valid_feat, valid_tgt = read_and_reshape(cfg.valid_path, cfg.max_valid_seqs)
 
     train_feat = engineer_features(train_feat)
-    valid_feat = engineer_features(valid_feat)
+    if not cfg.skip_validation:
+        valid_feat = engineer_features(valid_feat)
 
     mean = train_feat.reshape(-1, train_feat.shape[-1]).mean(axis=0).astype(np.float32)
     std = train_feat.reshape(-1, train_feat.shape[-1]).std(axis=0).astype(np.float32)
     std = np.where(std < 1e-6, 1.0, std)
 
     train_feat = ((train_feat - mean) / std).astype(np.float32)
-    valid_feat = ((valid_feat - mean) / std).astype(np.float32)
+    if not cfg.skip_validation:
+        valid_feat = ((valid_feat - mean) / std).astype(np.float32)
 
     train_ds = SequenceWindowDataset(train_feat, train_tgt, cfg.context_len)
-    valid_ds = SequenceWindowDataset(valid_feat, valid_tgt, cfg.context_len)
+    if not cfg.skip_validation:
+        valid_ds = SequenceWindowDataset(valid_feat, valid_tgt, cfg.context_len)
 
     train_loader = DataLoader(
         train_ds,
@@ -168,13 +173,14 @@ def train(cfg: TrainConfig):
         pin_memory=(cfg.device != "cpu"),
         drop_last=True,
     )
-    valid_loader = DataLoader(
-        valid_ds,
-        batch_size=cfg.batch_size,
-        shuffle=False,
-        num_workers=cfg.num_workers,
-        pin_memory=(cfg.device != "cpu"),
-    )
+    if not cfg.skip_validation:
+        valid_loader = DataLoader(
+            valid_ds,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.num_workers,
+            pin_memory=(cfg.device != "cpu"),
+        )
 
     device = torch.device(cfg.device)
     model = LOBTransformer(
@@ -213,14 +219,20 @@ def train(cfg: TrainConfig):
 
         scheduler.step()
         train_loss = running / max(seen, 1)
-        val_loss = evaluate(model, valid_loader, device)
+        if cfg.skip_validation:
+            val_loss = None
+            print(f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f}")
+            score_to_track = train_loss
+        else:
+            val_loss = evaluate(model, valid_loader, device)
+            print(
+                f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
+                f"valid_weighted_pearson_loss={val_loss:.6f}"
+            )
+            score_to_track = val_loss
 
-        print(
-            f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
-            f"valid_weighted_pearson_loss={val_loss:.6f}"
-        )
-        if val_loss < best_val:
-            best_val = val_loss
+        if score_to_track < best_val:
+            best_val = score_to_track
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     if best_state is None:
@@ -265,6 +277,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--skip-validation", action="store_true")
     return parser.parse_args()
 
 
@@ -289,5 +302,6 @@ if __name__ == "__main__":
         seed=args.seed,
         device=args.device,
         num_workers=args.num_workers,
+        skip_validation=args.skip_validation,
     )
     train(config)
