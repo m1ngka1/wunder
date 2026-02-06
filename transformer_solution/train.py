@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import random
+import sys
 from dataclasses import dataclass
 
 import numpy as np
@@ -10,10 +11,12 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-try:
-    from model import LOBTransformer
-except ModuleNotFoundError:
-    from .model import LOBTransformer  # type: ignore
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.append(CURRENT_DIR)
+
+from feature_engineering import engineer_features
+from model import LOBTransformer
 
 
 @dataclass
@@ -46,7 +49,7 @@ class SequenceWindowDataset(Dataset):
         context_len: int,
     ):
         """
-        features: [n_seq, 1000, 32]
+        features: [n_seq, 1000, feature_dim]
         targets: [n_seq, 1000, 2]
         """
         self.features = features
@@ -126,6 +129,9 @@ def train(cfg: TrainConfig):
     train_feat, train_tgt = read_and_reshape(cfg.train_path, cfg.max_train_seqs)
     valid_feat, valid_tgt = read_and_reshape(cfg.valid_path, cfg.max_valid_seqs)
 
+    train_feat = engineer_features(train_feat)
+    valid_feat = engineer_features(valid_feat)
+
     mean = train_feat.reshape(-1, train_feat.shape[-1]).mean(axis=0).astype(np.float32)
     std = train_feat.reshape(-1, train_feat.shape[-1]).std(axis=0).astype(np.float32)
     std = np.where(std < 1e-6, 1.0, std)
@@ -154,7 +160,7 @@ def train(cfg: TrainConfig):
 
     device = torch.device(cfg.device)
     model = LOBTransformer(
-        input_dim=32,
+        input_dim=train_feat.shape[-1],
         d_model=cfg.d_model,
         nhead=cfg.nhead,
         num_layers=cfg.num_layers,
@@ -205,6 +211,7 @@ def train(cfg: TrainConfig):
     np.savez(
         os.path.join(cfg.out_dir, "config.npz"),
         context_len=cfg.context_len,
+        feature_dim=train_feat.shape[-1],
         d_model=cfg.d_model,
         nhead=cfg.nhead,
         num_layers=cfg.num_layers,

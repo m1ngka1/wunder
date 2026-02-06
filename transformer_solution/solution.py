@@ -8,12 +8,12 @@ import torch
 # Adjust path to import utils from parent directory
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(f"{CURRENT_DIR}/..")
+if CURRENT_DIR not in sys.path:
+    sys.path.append(CURRENT_DIR)
 
 from utils import DataPoint, ScorerStepByStep  # noqa: E402
-try:
-    from model import LOBTransformer  # noqa: E402
-except ModuleNotFoundError:
-    from .model import LOBTransformer  # type: ignore  # noqa: E402
+from feature_engineering import FeatureEngineer  # noqa: E402
+from model import LOBTransformer  # noqa: E402
 
 
 class PredictionModel:
@@ -42,15 +42,19 @@ class PredictionModel:
 
         # Defaults let code run even if artifacts are missing.
         self.context_len = 128
-        self.feature_mean = np.zeros(32, dtype=np.float32)
-        self.feature_std = np.ones(32, dtype=np.float32)
-        self.model = LOBTransformer(max_len=self.context_len)
+        self.feature_dim = 51
+        self.feature_mean = np.zeros(self.feature_dim, dtype=np.float32)
+        self.feature_std = np.ones(self.feature_dim, dtype=np.float32)
+        self.model = LOBTransformer(input_dim=self.feature_dim, max_len=self.context_len)
         self.history = deque(maxlen=self.context_len)
+        self.feature_engineer = FeatureEngineer()
 
         try:
             if os.path.exists(config_path):
                 cfg = np.load(config_path)
                 self.context_len = int(cfg["context_len"])
+                if "feature_dim" in cfg:
+                    self.feature_dim = int(cfg["feature_dim"])
                 d_model = int(cfg["d_model"])
                 nhead = int(cfg["nhead"])
                 num_layers = int(cfg["num_layers"])
@@ -64,7 +68,7 @@ class PredictionModel:
                 dropout = 0.1
 
             self.model = LOBTransformer(
-                input_dim=32,
+                input_dim=self.feature_dim,
                 d_model=d_model,
                 nhead=nhead,
                 num_layers=num_layers,
@@ -74,12 +78,20 @@ class PredictionModel:
             ).to(self.device)
             self.model.eval()
             self.history = deque(maxlen=self.context_len)
+            self.feature_engineer = FeatureEngineer()
 
             if os.path.exists(stats_path):
                 stats = np.load(stats_path)
                 self.feature_mean = stats["mean"].astype(np.float32)
                 self.feature_std = stats["std"].astype(np.float32)
                 self.feature_std = np.where(self.feature_std < 1e-6, 1.0, self.feature_std)
+                if self.feature_mean.shape[0] != self.feature_dim:
+                    print(
+                        "[WARN] Feature stats dimension mismatch. "
+                        "Falling back to default normalization."
+                    )
+                    self.feature_mean = np.zeros(self.feature_dim, dtype=np.float32)
+                    self.feature_std = np.ones(self.feature_dim, dtype=np.float32)
 
             if os.path.exists(ckpt_path):
                 state_dict = torch.load(ckpt_path, map_location="cpu")
@@ -92,6 +104,7 @@ class PredictionModel:
     def _reset_sequence(self, seq_ix: int):
         self.current_seq_ix = seq_ix
         self.history.clear()
+        self.feature_engineer.reset()
 
     def _prepare_model_input(self) -> torch.Tensor:
         window = np.asarray(self.history, dtype=np.float32)
@@ -103,7 +116,8 @@ class PredictionModel:
         if self.current_seq_ix != data_point.seq_ix:
             self._reset_sequence(data_point.seq_ix)
 
-        self.history.append(np.asarray(data_point.state, dtype=np.float32).copy())
+        engineered = self.feature_engineer.update(np.asarray(data_point.state, dtype=np.float32))
+        self.history.append(engineered)
 
         if not data_point.need_prediction:
             return None
