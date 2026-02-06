@@ -1,0 +1,77 @@
+name: Kaggle Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_id:
+        description: "Kaggle kernel id (e.g. mingkaijia/wunder-transformer-gpu-train)"
+        required: true
+        default: "mingkaijia/wunder-transformer-gpu-train"
+      dataset_id:
+        description: "Kaggle dataset id (e.g. mingkaijia/wunder-train-valid-parquet)"
+        required: true
+        default: "mingkaijia/wunder-train-valid-parquet"
+      epochs:
+        description: "WUNDER_EPOCHS"
+        required: true
+        default: "2"
+      nhead:
+        description: "WUNDER_NHEAD"
+        required: true
+        default: "4"
+      skip_validation:
+        description: "WUNDER_SKIP_VALIDATION (0 or 1)"
+        required: true
+        default: "0"
+      max_train_seqs:
+        description: "WUNDER_MAX_TRAIN_SEQS (0 means all)"
+        required: true
+        default: "0"
+      max_valid_seqs:
+        description: "WUNDER_MAX_VALID_SEQS (0 means all)"
+        required: true
+        default: "0"
+
+jobs:
+  push-kaggle-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bootstrap Kaggle Auth
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          ./kaggle_tools/bootstrap_kaggle_auth.sh
+
+      - name: Push Kernel Run
+        env:
+          KAGGLE_KERNEL_ID: ${{ github.event.inputs.kernel_id }}
+          KAGGLE_DATASET: ${{ github.event.inputs.dataset_id }}
+          KAGGLE_KERNEL_TITLE: Wunder Transformer GPU Train
+          WUNDER_EPOCHS: ${{ github.event.inputs.epochs }}
+          WUNDER_NHEAD: ${{ github.event.inputs.nhead }}
+          WUNDER_SKIP_VALIDATION: ${{ github.event.inputs.skip_validation }}
+          WUNDER_MAX_TRAIN_SEQS: ${{ github.event.inputs.max_train_seqs }}
+          WUNDER_MAX_VALID_SEQS: ${{ github.event.inputs.max_valid_seqs }}
+          WUNDER_BATCH_SIZE: "256"
+          WUNDER_NUM_WORKERS: "2"
+          WUNDER_LOG_INTERVAL: "100"
+          WUNDER_EARLY_STOPPING_PATIENCE: "3"
+          WUNDER_EARLY_STOPPING_MIN_DELTA: "0.0"
+        run: |
+          ./kaggle_tools/push_kernel.sh
+
+      - name: Check Kernel Status
+        env:
+          KAGGLE_KERNEL_ID: ${{ github.event.inputs.kernel_id }}
+        run: |
+          python -m kaggle.cli kernels status "${KAGGLE_KERNEL_ID}"
+

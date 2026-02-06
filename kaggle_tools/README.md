@@ -74,3 +74,30 @@ That will copy the trained artifacts into the chosen solution directory.
 
 - The Kaggle run writes artifacts into `/kaggle/working/outputs` and packages a `solution.zip` containing the trained model + inference code.
 - You can monitor kernel status via `kaggle kernels status $KAGGLE_KERNEL_ID`.
+
+## GitHub Actions setup (for cloud/phone triggering)
+
+You can trigger runs from GitHub Actions without local files by using the workflow:
+
+- `.github/workflows/kaggle-run.yml`
+
+### 1. Add repository secrets
+
+In GitHub UI: `Settings` -> `Secrets and variables` -> `Actions` -> `New repository secret`:
+
+- `KAGGLE_USERNAME`
+- `KAGGLE_KEY`
+
+### 2. Trigger the workflow
+
+In GitHub UI: `Actions` -> `Kaggle Run` -> `Run workflow`.
+
+Set inputs such as:
+
+- `kernel_id`: `mingkaijia/wunder-transformer-gpu-train`
+- `dataset_id`: `mingkaijia/wunder-train-valid-parquet`
+- `epochs`: `2`
+- `nhead`: `4`
+- `skip_validation`: `0`
+
+The workflow bootstraps Kaggle auth via `kaggle_tools/bootstrap_kaggle_auth.sh` and pushes a kernel run using `kaggle_tools/push_kernel.sh`.
