@@ -7,6 +7,7 @@ This folder contains a Transformer-based solution compatible with the competitio
 - `solution.py`: Submission entrypoint with `PredictionModel`.
 - `model.py`: `LOBTransformer` architecture.
 - `train.py`: Training script that saves model + normalization artifacts.
+- `feature_engineering.py`: Feature engineering helpers for LOB-derived signals.
 - `environment.yml`: Clean conda environment recipe (no `KMP_DUPLICATE_LIB_OK` workaround needed).
 
 ## Environment setup
