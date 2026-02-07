@@ -44,6 +44,8 @@ class TrainConfig:
     log_interval: int = 100
     early_stopping_patience: int = 4
     early_stopping_min_delta: float = 0.0
+    target_balance_momentum: float = 0.9
+    target_min_weight: float = 0.15
 
 
 class SequenceWindowDataset(Dataset):
@@ -187,6 +189,13 @@ def read_and_reshape(path: str, max_seqs: int | None = None):
 
 
 def weighted_pearson_loss(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
+    per_target_loss, _ = weighted_pearson_per_target(y_true, y_pred)
+    return per_target_loss.mean()
+
+
+def weighted_pearson_per_target(
+    y_true: torch.Tensor, y_pred: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     y_pred = torch.clamp(y_pred, -6.0, 6.0)
     weights = torch.abs(y_true).clamp_min(1e-8)
     sum_w = weights.sum(dim=0)
@@ -202,7 +211,25 @@ def weighted_pearson_loss(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.T
     var_pred = (weights * dev_pred.pow(2)).sum(dim=0) / sum_w
 
     corr = cov / (torch.sqrt(var_true) * torch.sqrt(var_pred) + 1e-8)
-    return -corr.mean()
+    per_target_loss = -corr
+    return per_target_loss, corr
+
+
+def dynamic_target_weights(
+    per_target_loss: torch.Tensor, prev_weights: torch.Tensor, min_weight: float
+) -> torch.Tensor:
+    # Emphasize harder targets while keeping each target weight above floor.
+    hardness = per_target_loss - per_target_loss.min()
+    if torch.all(hardness < 1e-8):
+        target_weights = torch.full_like(per_target_loss, 1.0 / per_target_loss.numel())
+    else:
+        target_weights = hardness / hardness.sum()
+    mixed = 0.5 * target_weights + 0.5 * torch.full_like(
+        target_weights, 1.0 / target_weights.numel()
+    )
+    clipped = torch.clamp(mixed, min=min_weight)
+    clipped = clipped / clipped.sum()
+    return 0.5 * prev_weights + 0.5 * clipped
 
 
 def evaluate(
@@ -213,6 +240,8 @@ def evaluate(
 ):
     model.eval()
     loss_sum = 0.0
+    loss_tgt_sum = None
+    corr_tgt_sum = None
     n = 0
     with torch.no_grad():
         for x, y in loader:
@@ -220,10 +249,21 @@ def evaluate(
             y = y.to(device, non_blocking=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 pred = model(x)
-                loss = weighted_pearson_loss(y, pred)
+                per_target_loss, per_target_corr = weighted_pearson_per_target(y, pred)
+                loss = per_target_loss.mean()
             loss_sum += loss.item() * x.size(0)
+            if loss_tgt_sum is None:
+                loss_tgt_sum = torch.zeros_like(per_target_loss)
+                corr_tgt_sum = torch.zeros_like(per_target_corr)
+            loss_tgt_sum += per_target_loss.detach().cpu() * x.size(0)
+            corr_tgt_sum += per_target_corr.detach().cpu() * x.size(0)
             n += x.size(0)
-    return loss_sum / max(n, 1)
+    n = max(n, 1)
+    return {
+        "loss": loss_sum / n,
+        "loss_per_target": (loss_tgt_sum / n).tolist(),
+        "corr_per_target": (corr_tgt_sum / n).tolist(),
+    }
 
 
 def train(cfg: TrainConfig):
@@ -256,15 +296,10 @@ def train(cfg: TrainConfig):
             f"shape={valid_feat.shape}, targets={valid_tgt.shape}"
         )
 
-    log("Computing normalization stats from train features...")
-    mean = train_feat.reshape(-1, train_feat.shape[-1]).mean(axis=0).astype(np.float32)
-    std = train_feat.reshape(-1, train_feat.shape[-1]).std(axis=0).astype(np.float32)
-    std = np.where(std < 1e-6, 1.0, std)
-
-    log("Applying normalization...")
-    train_feat = ((train_feat - mean) / std).astype(np.float32)
-    if not cfg.skip_validation:
-        valid_feat = ((valid_feat - mean) / std).astype(np.float32)
+    # Keep identity stats in artifacts for compatibility; model handles normalization with BatchNorm.
+    feature_dim = train_feat.shape[-1]
+    mean = np.zeros(feature_dim, dtype=np.float32)
+    std = np.ones(feature_dim, dtype=np.float32)
     feature_dim = train_feat.shape[-1]
 
     log("Building datasets...")
@@ -328,16 +363,30 @@ def train(cfg: TrainConfig):
     history = {
         "epoch": [],
         "train_loss": [],
+        "train_loss_t0": [],
+        "train_loss_t1": [],
+        "train_corr_t0": [],
+        "train_corr_t1": [],
         "valid_loss": [],
+        "valid_loss_t0": [],
+        "valid_loss_t1": [],
+        "valid_corr_t0": [],
+        "valid_corr_t1": [],
+        "target_weight_t0": [],
+        "target_weight_t1": [],
         "lr": [],
         "elapsed_sec": [],
     }
     train_start = time.time()
+    target_weights = torch.tensor([0.5, 0.5], dtype=torch.float32)
+    use_tqdm = sys.stderr.isatty()
 
     for epoch in range(1, cfg.epochs + 1):
         epoch_start = time.time()
         model.train()
         running = 0.0
+        running_loss_tgt = torch.zeros(2)
+        running_corr_tgt = torch.zeros(2)
         seen = 0
         pbar = tqdm(
             enumerate(train_loader, start=1),
@@ -345,6 +394,7 @@ def train(cfg: TrainConfig):
             desc=f"epoch {epoch:02d}/{cfg.epochs}",
             leave=False,
             mininterval=2.0,
+            disable=not use_tqdm,
         )
         for step, (x, y) in pbar:
             x = x.to(device, non_blocking=True)
@@ -353,7 +403,9 @@ def train(cfg: TrainConfig):
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 pred = model(x)
-                loss = weighted_pearson_loss(y, pred)
+                per_target_loss, per_target_corr = weighted_pearson_per_target(y, pred)
+                cur_weights = target_weights.to(device)
+                loss = torch.sum(cur_weights * per_target_loss)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -362,33 +414,83 @@ def train(cfg: TrainConfig):
             scaler.update()
 
             running += loss.item() * x.size(0)
+            running_loss_tgt += per_target_loss.detach().cpu() * x.size(0)
+            running_corr_tgt += per_target_corr.detach().cpu() * x.size(0)
             seen += x.size(0)
+            with torch.no_grad():
+                batch_weights = dynamic_target_weights(
+                    per_target_loss.detach().cpu(),
+                    prev_weights=target_weights,
+                    min_weight=cfg.target_min_weight,
+                )
+                target_weights = (
+                    cfg.target_balance_momentum * target_weights
+                    + (1.0 - cfg.target_balance_momentum) * batch_weights
+                )
+                target_weights = target_weights / target_weights.sum()
 
             if step % max(cfg.log_interval, 1) == 0 or step == len(train_loader):
                 avg_loss = running / max(seen, 1)
-                pbar.set_postfix({"train_loss": f"{avg_loss:.6f}", "lr": f"{optimizer.param_groups[0]['lr']:.2e}"})
+                avg_loss_tgt = running_loss_tgt / max(seen, 1)
+                avg_corr_tgt = running_corr_tgt / max(seen, 1)
+                if use_tqdm:
+                    pbar.set_postfix(
+                        {
+                            "train_loss": f"{avg_loss:.6f}",
+                            "t0": f"{avg_corr_tgt[0].item():.4f}",
+                            "t1": f"{avg_corr_tgt[1].item():.4f}",
+                            "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
+                        }
+                    )
                 log(
                     f"epoch={epoch:02d} step={step}/{len(train_loader)} "
-                    f"train_loss={avg_loss:.6f} lr={optimizer.param_groups[0]['lr']:.3e}"
+                    f"train_loss={avg_loss:.6f} "
+                    f"train_t0_loss={avg_loss_tgt[0].item():.6f} train_t1_loss={avg_loss_tgt[1].item():.6f} "
+                    f"train_t0_corr={avg_corr_tgt[0].item():.6f} train_t1_corr={avg_corr_tgt[1].item():.6f} "
+                    f"w_t0={target_weights[0].item():.3f} w_t1={target_weights[1].item():.3f} "
+                    f"lr={optimizer.param_groups[0]['lr']:.3e}"
                 )
 
         scheduler.step()
         train_loss = running / max(seen, 1)
+        train_loss_tgt = running_loss_tgt / max(seen, 1)
+        train_corr_tgt = running_corr_tgt / max(seen, 1)
         if cfg.skip_validation:
-            val_loss = None
-            log(f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f}")
-            score_to_track = train_loss
-        else:
-            val_loss = evaluate(model, valid_loader, device, use_amp)
+            val_result = None
             log(
                 f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
-                f"valid_weighted_pearson_loss={val_loss:.6f}"
+                f"train_t0_loss={train_loss_tgt[0].item():.6f} train_t1_loss={train_loss_tgt[1].item():.6f} "
+                f"train_t0_corr={train_corr_tgt[0].item():.6f} train_t1_corr={train_corr_tgt[1].item():.6f}"
+            )
+            score_to_track = train_loss
+        else:
+            val_result = evaluate(model, valid_loader, device, use_amp)
+            val_loss = val_result["loss"]
+            vlt = val_result["loss_per_target"]
+            vct = val_result["corr_per_target"]
+            log(
+                f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
+                f"train_t0_loss={train_loss_tgt[0].item():.6f} train_t1_loss={train_loss_tgt[1].item():.6f} "
+                f"train_t0_corr={train_corr_tgt[0].item():.6f} train_t1_corr={train_corr_tgt[1].item():.6f} "
+                f"valid_weighted_pearson_loss={val_loss:.6f} "
+                f"valid_t0_loss={vlt[0]:.6f} valid_t1_loss={vlt[1]:.6f} "
+                f"valid_t0_corr={vct[0]:.6f} valid_t1_corr={vct[1]:.6f}"
             )
             score_to_track = val_loss
 
         history["epoch"].append(epoch)
         history["train_loss"].append(float(train_loss))
-        history["valid_loss"].append(None if val_loss is None else float(val_loss))
+        history["train_loss_t0"].append(float(train_loss_tgt[0].item()))
+        history["train_loss_t1"].append(float(train_loss_tgt[1].item()))
+        history["train_corr_t0"].append(float(train_corr_tgt[0].item()))
+        history["train_corr_t1"].append(float(train_corr_tgt[1].item()))
+        history["valid_loss"].append(None if val_result is None else float(val_result["loss"]))
+        history["valid_loss_t0"].append(None if val_result is None else float(val_result["loss_per_target"][0]))
+        history["valid_loss_t1"].append(None if val_result is None else float(val_result["loss_per_target"][1]))
+        history["valid_corr_t0"].append(None if val_result is None else float(val_result["corr_per_target"][0]))
+        history["valid_corr_t1"].append(None if val_result is None else float(val_result["corr_per_target"][1]))
+        history["target_weight_t0"].append(float(target_weights[0].item()))
+        history["target_weight_t1"].append(float(target_weights[1].item()))
         history["lr"].append(float(optimizer.param_groups[0]["lr"]))
         history["elapsed_sec"].append(float(time.time() - train_start))
         log(f"epoch={epoch:02d} elapsed_sec={time.time() - epoch_start:.1f}")
@@ -451,12 +553,14 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default="cuda")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--skip-validation", action="store_true")
     parser.add_argument("--log-interval", type=int, default=100)
     parser.add_argument("--early-stopping-patience", type=int, default=4)
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    parser.add_argument("--target-balance-momentum", type=float, default=0.9)
+    parser.add_argument("--target-min-weight", type=float, default=0.15)
     return parser.parse_args()
 
 
@@ -485,5 +589,7 @@ if __name__ == "__main__":
         log_interval=args.log_interval,
         early_stopping_patience=args.early_stopping_patience,
         early_stopping_min_delta=args.early_stopping_min_delta,
+        target_balance_momentum=args.target_balance_momentum,
+        target_min_weight=args.target_min_weight,
     )
     train(config)

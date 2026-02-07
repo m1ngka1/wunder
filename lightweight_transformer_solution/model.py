@@ -15,6 +15,7 @@ class LightweightLOBTransformer(nn.Module):
     ):
         super().__init__()
         self.max_len = max_len
+        self.input_bn = nn.BatchNorm1d(input_dim)
         self.input_proj = nn.Linear(input_dim, d_model)
         self.pos_emb = nn.Parameter(torch.zeros(1, max_len, d_model))
         self.norm_in = nn.LayerNorm(d_model)
@@ -50,6 +51,8 @@ class LightweightLOBTransformer(nn.Module):
         if seq_len > self.max_len:
             raise ValueError(f"seq_len={seq_len} is greater than max_len={self.max_len}")
 
+        # BatchNorm over feature channels.
+        x = self.input_bn(x.transpose(1, 2)).transpose(1, 2)
         h = self.input_proj(x)
         h = h + self.pos_emb[:, :seq_len, :]
         h = self.norm_in(h)
