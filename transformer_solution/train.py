@@ -97,7 +97,7 @@ def log(message: str):
 
 
 def save_artifacts(
-    out_dir: str,
+    artifact_dir: str,
     epoch: int,
     model_state_dict: dict,
     optimizer: torch.optim.Optimizer,
@@ -110,7 +110,7 @@ def save_artifacts(
     cfg: TrainConfig,
     feature_dim: int,
 ):
-    checkpoints_dir = os.path.join(out_dir, "checkpoints")
+    checkpoints_dir = os.path.join(artifact_dir, "checkpoints")
     os.makedirs(checkpoints_dir, exist_ok=True)
     epoch_dir = os.path.join(checkpoints_dir, f"epoch_{epoch:03d}")
     os.makedirs(epoch_dir, exist_ok=True)
@@ -126,11 +126,11 @@ def save_artifacts(
     }
 
     # Root-level latest artifacts for inference and quick inspection.
-    torch.save(model_state_dict, os.path.join(out_dir, "transformer_model.pt"))
-    torch.save(bundle, os.path.join(out_dir, "transformer_training_bundle.pt"))
-    np.savez(os.path.join(out_dir, "feature_stats.npz"), mean=mean, std=std)
+    torch.save(model_state_dict, os.path.join(artifact_dir, "transformer_model.pt"))
+    torch.save(bundle, os.path.join(artifact_dir, "transformer_training_bundle.pt"))
+    np.savez(os.path.join(artifact_dir, "feature_stats.npz"), mean=mean, std=std)
     np.savez(
-        os.path.join(out_dir, "config.npz"),
+        os.path.join(artifact_dir, "config.npz"),
         context_len=cfg.context_len,
         feature_dim=feature_dim,
         d_model=cfg.d_model,
@@ -139,9 +139,9 @@ def save_artifacts(
         dim_feedforward=cfg.dim_feedforward,
         dropout=cfg.dropout,
     )
-    with open(os.path.join(out_dir, "train_config.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(artifact_dir, "train_config.json"), "w", encoding="utf-8") as f:
         json.dump(cfg.__dict__, f, indent=2)
-    with open(os.path.join(out_dir, "train_history.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(artifact_dir, "train_history.json"), "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
 
     # Epoch-specific checkpoint for resume/recovery after timeout/cancel.
@@ -223,6 +223,8 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, use_amp
 
 def train(cfg: TrainConfig):
     os.makedirs(cfg.out_dir, exist_ok=True)
+    artifact_dir = os.path.join(cfg.out_dir, "artifacts")
+    os.makedirs(artifact_dir, exist_ok=True)
     set_seed(cfg.seed)
     log(f"Training config: {cfg}")
 
@@ -404,7 +406,7 @@ def train(cfg: TrainConfig):
 
         latest_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
         save_artifacts(
-            out_dir=cfg.out_dir,
+            artifact_dir=artifact_dir,
             epoch=epoch,
             model_state_dict=latest_state,
             optimizer=optimizer,
@@ -430,9 +432,9 @@ def train(cfg: TrainConfig):
         best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     # Keep best model at root for inference packaging.
-    torch.save(best_state, os.path.join(cfg.out_dir, "transformer_model.pt"))
+    torch.save(best_state, os.path.join(artifact_dir, "transformer_model.pt"))
 
-    log(f"Saved model artifacts to: {cfg.out_dir}")
+    log(f"Saved model artifacts to: {artifact_dir}")
 
 
 def parse_args():

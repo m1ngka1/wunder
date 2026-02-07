@@ -72,6 +72,8 @@ def main() -> None:
 
     output_dir = Path(os.environ.get("WUNDER_OUTPUT_DIR", "/kaggle/working/outputs"))
     output_dir.mkdir(parents=True, exist_ok=True)
+    artifact_dir = output_dir / "artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = TrainConfig(
         train_path=str(train_path),
@@ -99,7 +101,6 @@ def main() -> None:
     )
 
     train(cfg)
-
     artifacts = [
         "transformer_model.pt",
         "transformer_training_bundle.pt",
@@ -110,7 +111,7 @@ def main() -> None:
     ]
 
     for filename in artifacts:
-        src = output_dir / filename
+        src = artifact_dir / filename
         if not src.exists():
             raise FileNotFoundError(f"Missing artifact {src}")
 
@@ -125,28 +126,32 @@ def main() -> None:
     if utils_path.exists():
         shutil.copy2(utils_path, output_dir / "utils.py")
 
-    solution_zip = output_dir / "solution.zip"
+    solution_zip = artifact_dir / "solution.zip"
     with zipfile.ZipFile(solution_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for filename in [
             "solution.py",
             "model.py",
             "feature_engineering.py",
+        ]:
+            archive.write(output_dir / filename, arcname=filename)
+        for filename in [
             "transformer_model.pt",
             "feature_stats.npz",
             "config.npz",
             "train_config.json",
         ]:
-            archive.write(output_dir / filename, arcname=filename)
+            archive.write(artifact_dir / filename, arcname=f"artifacts/{filename}")
         if (output_dir / "utils.py").exists():
             archive.write(output_dir / "utils.py", arcname="utils.py")
 
     report = {
         "output_dir": str(output_dir),
+        "artifact_dir": str(artifact_dir),
         "solution_zip": str(solution_zip),
         "train_path": str(train_path),
         "valid_path": str(valid_path),
     }
-    with open(output_dir / "kaggle_run_report.json", "w", encoding="utf-8") as handle:
+    with open(artifact_dir / "kaggle_run_report.json", "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)
 
     print(json.dumps(report, indent=2))

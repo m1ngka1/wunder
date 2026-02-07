@@ -17,3 +17,4 @@ kaggle_outputs/
 # Training artifacts and archives
 archived/
 **/checkpoints/
+transformer_solution/artifacts/

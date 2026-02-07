@@ -6,7 +6,7 @@ This folder contains a Transformer-based solution compatible with the competitio
 
 - `solution.py`: Submission entrypoint with `PredictionModel`.
 - `model.py`: `LOBTransformer` architecture.
-- `train.py`: Training script that saves model + normalization artifacts.
+- `train.py`: Training script that saves model + normalization artifacts under `artifacts/`.
 - `feature_engineering.py`: Feature engineering helpers for LOB-derived signals.
 - `environment.yml`: Clean conda environment recipe (no `KMP_DUPLICATE_LIB_OK` workaround needed).
 
@@ -52,6 +52,8 @@ conda run -n wunder2 python transformer_solution/train.py \
 conda run -n wunder2 python transformer_solution/solution.py
 ```
 
+`solution.py` loads artifacts from `transformer_solution/artifacts/` by default.
+
 ## Package submission
 
 From inside `transformer_solution/`:
@@ -59,6 +61,8 @@ From inside `transformer_solution/`:
 ```bash
 zip -r ../solution.zip .
 ```
+
+Submission package should include code files plus the `artifacts/` folder.
 
 ## Kaggle GPU training
 

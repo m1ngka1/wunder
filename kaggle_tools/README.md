@@ -68,11 +68,11 @@ export WUNDER_SYNC_DIR="../transformer_solution"
 ./pull_outputs.sh
 ```
 
-That will copy the trained artifacts into the chosen solution directory.
+That will copy the trained artifacts into `<solution_dir>/artifacts/`.
 
 ## Notes
 
-- The Kaggle run writes artifacts into `/kaggle/working/outputs` and packages a `solution.zip` containing the trained model + inference code.
+- The Kaggle run writes artifacts into `/kaggle/working/outputs/artifacts` and packages `artifacts/solution.zip`.
 - You can monitor kernel status via `kaggle kernels status $KAGGLE_KERNEL_ID`.
 
 ## GitHub Actions setup (for cloud/phone triggering)

@@ -24,10 +24,10 @@ class PredictionModel:
     """
     Transformer-based streaming predictor.
 
-    Expected artifacts next to this file:
-      - transformer_model.pt
-      - feature_stats.npz
-      - config.npz
+    Expected artifacts under `artifacts/` next to this file:
+      - artifacts/transformer_model.pt
+      - artifacts/feature_stats.npz
+      - artifacts/config.npz
     """
 
     def __init__(self, model_path: str = ""):
@@ -39,9 +39,13 @@ class PredictionModel:
         self._ort_input_name = None
 
         if model_path:
-            artifact_dir = model_path
+            if os.path.isdir(os.path.join(model_path, "artifacts")):
+                artifact_dir = os.path.join(model_path, "artifacts")
+            else:
+                artifact_dir = model_path
         else:
-            artifact_dir = CURRENT_DIR
+            default_artifact_dir = os.path.join(CURRENT_DIR, "artifacts")
+            artifact_dir = default_artifact_dir if os.path.isdir(default_artifact_dir) else CURRENT_DIR
 
         config_path = os.path.join(artifact_dir, "config.npz")
         stats_path = os.path.join(artifact_dir, "feature_stats.npz")
@@ -58,22 +62,39 @@ class PredictionModel:
         self.feature_engineer = FeatureEngineer()
 
         try:
+            d_model = 128
+            nhead = 8
+            num_layers = 3
+            dim_feedforward = 256
+            dropout = 0.1
+            cfg_has_feature_dim = False
+
             if os.path.exists(config_path):
                 cfg = np.load(config_path)
                 self.context_len = int(cfg["context_len"])
                 if "feature_dim" in cfg:
                     self.feature_dim = int(cfg["feature_dim"])
-                d_model = int(cfg["d_model"])
-                nhead = int(cfg["nhead"])
-                num_layers = int(cfg["num_layers"])
-                dim_feedforward = int(cfg["dim_feedforward"])
-                dropout = float(cfg["dropout"])
-            else:
-                d_model = 128
-                nhead = 8
-                num_layers = 3
-                dim_feedforward = 256
-                dropout = 0.1
+                    cfg_has_feature_dim = True
+                if "d_model" in cfg:
+                    d_model = int(cfg["d_model"])
+                if "nhead" in cfg:
+                    nhead = int(cfg["nhead"])
+                if "num_layers" in cfg:
+                    num_layers = int(cfg["num_layers"])
+                if "dim_feedforward" in cfg:
+                    dim_feedforward = int(cfg["dim_feedforward"])
+                if "dropout" in cfg:
+                    dropout = float(cfg["dropout"])
+
+            stats_mean = None
+            stats_std = None
+            if os.path.exists(stats_path):
+                stats = np.load(stats_path)
+                stats_mean = stats["mean"].astype(np.float32)
+                stats_std = stats["std"].astype(np.float32)
+                stats_std = np.where(stats_std < 1e-6, 1.0, stats_std)
+                if not cfg_has_feature_dim:
+                    self.feature_dim = int(stats_mean.shape[0])
 
             self.model = LOBTransformer(
                 input_dim=self.feature_dim,
@@ -88,11 +109,9 @@ class PredictionModel:
             self.history = deque(maxlen=self.context_len)
             self.feature_engineer = FeatureEngineer()
 
-            if os.path.exists(stats_path):
-                stats = np.load(stats_path)
-                self.feature_mean = stats["mean"].astype(np.float32)
-                self.feature_std = stats["std"].astype(np.float32)
-                self.feature_std = np.where(self.feature_std < 1e-6, 1.0, self.feature_std)
+            if stats_mean is not None and stats_std is not None:
+                self.feature_mean = stats_mean
+                self.feature_std = stats_std
                 if self.feature_mean.shape[0] != self.feature_dim:
                     print(
                         "[WARN] Feature stats dimension mismatch. "
@@ -103,6 +122,13 @@ class PredictionModel:
 
             if os.path.exists(ckpt_path):
                 state_dict = torch.load(ckpt_path, map_location="cpu")
+                if "input_proj.weight" in state_dict:
+                    ckpt_feature_dim = int(state_dict["input_proj.weight"].shape[1])
+                    if ckpt_feature_dim != self.feature_dim:
+                        raise ValueError(
+                            "Checkpoint/model feature dim mismatch: "
+                            f"checkpoint={ckpt_feature_dim}, configured={self.feature_dim}"
+                        )
                 self.model.load_state_dict(state_dict, strict=True)
                 self._loaded = True
                 self._init_onnx_runtime(ckpt_path=ckpt_path, onnx_path=onnx_path)
