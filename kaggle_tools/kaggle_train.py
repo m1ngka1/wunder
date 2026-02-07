@@ -81,12 +81,12 @@ def main() -> None:
         out_dir=str(output_dir),
         max_train_seqs=_env_int("WUNDER_MAX_TRAIN_SEQS", 0),
         max_valid_seqs=_env_int("WUNDER_MAX_VALID_SEQS", 0),
-        context_len=_env_int("WUNDER_CONTEXT_LEN", 128),
-        d_model=_env_int("WUNDER_D_MODEL", 128),
+        context_len=_env_int("WUNDER_CONTEXT_LEN", 100),
+        d_model=_env_int("WUNDER_D_MODEL", 64),
         nhead=_env_int("WUNDER_NHEAD", 8),
         num_layers=_env_int("WUNDER_NUM_LAYERS", 3),
         dim_feedforward=_env_int("WUNDER_DIM_FEEDFORWARD", 256),
-        dropout=_env_float("WUNDER_DROPOUT", 0.1),
+        dropout=_env_float("WUNDER_DROPOUT", 0.3),
         batch_size=_env_int("WUNDER_BATCH_SIZE", 256),
         epochs=_env_int("WUNDER_EPOCHS", 3),
         lr=_env_float("WUNDER_LR", 2e-4),
@@ -98,6 +98,7 @@ def main() -> None:
         log_interval=_env_int("WUNDER_LOG_INTERVAL", 100),
         early_stopping_patience=_env_int("WUNDER_EARLY_STOPPING_PATIENCE", 3),
         early_stopping_min_delta=_env_float("WUNDER_EARLY_STOPPING_MIN_DELTA", 0.0),
+        hybrid_loss_alpha=_env_float("WUNDER_HYBRID_LOSS_ALPHA", 0.7),
     )
 
     train(cfg)

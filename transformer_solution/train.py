@@ -45,7 +45,7 @@ class TrainConfig:
     log_interval: int
     early_stopping_patience: int
     early_stopping_min_delta: float
-    hybrid_loss_alpha: float
+    hybrid_loss_alpha: float = 0.7
 
 
 class SequenceWindowDataset(Dataset):
