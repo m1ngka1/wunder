@@ -22,28 +22,28 @@ from model import LightweightLOBTransformer
 
 @dataclass
 class TrainConfig:
-    train_path: str
-    valid_path: str
-    out_dir: str
-    max_train_seqs: int
-    max_valid_seqs: int
-    context_len: int
-    d_model: int
-    nhead: int
-    num_layers: int
-    dim_feedforward: int
-    dropout: float
-    batch_size: int
-    epochs: int
-    lr: float
-    weight_decay: float
-    seed: int
-    device: str
-    num_workers: int
-    skip_validation: bool
-    log_interval: int
-    early_stopping_patience: int
-    early_stopping_min_delta: float
+    train_path: str = "../datasets/train.parquet"
+    valid_path: str = "../datasets/valid.parquet"
+    out_dir: str = "."
+    max_train_seqs: int = 2000
+    max_valid_seqs: int = 500
+    context_len: int = 32
+    d_model: int = 32
+    nhead: int = 4
+    num_layers: int = 2
+    dim_feedforward: int = 128
+    dropout: float = 0.1
+    batch_size: int = 512
+    epochs: int = 15
+    lr: float = 3e-4
+    weight_decay: float = 1e-4
+    seed: int = 42
+    device: str = "cuda"
+    num_workers: int = 4
+    skip_validation: bool = False
+    log_interval: int = 100
+    early_stopping_patience: int = 4
+    early_stopping_min_delta: float = 0.0
 
 
 class SequenceWindowDataset(Dataset):

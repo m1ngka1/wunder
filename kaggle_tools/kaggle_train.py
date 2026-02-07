@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import zipfile
+import inspect
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -40,6 +41,48 @@ def _env_bool(name: str, default: bool) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
+def _build_train_config(TrainConfig, train_path: Path, valid_path: Path, output_dir: Path):
+    # Always pass core paths; all other parameters are opt-in via WUNDER_* env vars.
+    candidate_kwargs = {
+        "train_path": str(train_path),
+        "valid_path": str(valid_path),
+        "out_dir": str(output_dir),
+    }
+    env_specs = {
+        "max_train_seqs": ("WUNDER_MAX_TRAIN_SEQS", int),
+        "max_valid_seqs": ("WUNDER_MAX_VALID_SEQS", int),
+        "context_len": ("WUNDER_CONTEXT_LEN", int),
+        "d_model": ("WUNDER_D_MODEL", int),
+        "nhead": ("WUNDER_NHEAD", int),
+        "num_layers": ("WUNDER_NUM_LAYERS", int),
+        "dim_feedforward": ("WUNDER_DIM_FEEDFORWARD", int),
+        "dropout": ("WUNDER_DROPOUT", float),
+        "batch_size": ("WUNDER_BATCH_SIZE", int),
+        "epochs": ("WUNDER_EPOCHS", int),
+        "lr": ("WUNDER_LR", float),
+        "weight_decay": ("WUNDER_WEIGHT_DECAY", float),
+        "seed": ("WUNDER_SEED", int),
+        "device": ("WUNDER_DEVICE", str),
+        "num_workers": ("WUNDER_NUM_WORKERS", int),
+        "skip_validation": ("WUNDER_SKIP_VALIDATION", lambda v: v.strip().lower() in {"1", "true", "yes", "y", "on"}),
+        "log_interval": ("WUNDER_LOG_INTERVAL", int),
+        "early_stopping_patience": ("WUNDER_EARLY_STOPPING_PATIENCE", int),
+        "early_stopping_min_delta": ("WUNDER_EARLY_STOPPING_MIN_DELTA", float),
+        "hybrid_loss_alpha": ("WUNDER_HYBRID_LOSS_ALPHA", float),
+    }
+    for key, (env_name, caster) in env_specs.items():
+        if env_name in os.environ:
+            candidate_kwargs[key] = caster(os.environ[env_name])
+
+    accepted = set(inspect.signature(TrainConfig).parameters.keys())
+    filtered_kwargs = {k: v for k, v in candidate_kwargs.items() if k in accepted}
+
+    dropped = sorted(set(candidate_kwargs) - set(filtered_kwargs))
+    if dropped:
+        print(f"[INFO] Ignoring unsupported TrainConfig args: {', '.join(dropped)}")
+
+    return TrainConfig(**filtered_kwargs)
+
 
 def main() -> None:
     for key, value in DEFAULT_ENV_OVERRIDES.items():
@@ -76,30 +119,11 @@ def main() -> None:
     artifact_dir = output_dir / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    cfg = TrainConfig(
-        train_path=str(train_path),
-        valid_path=str(valid_path),
-        out_dir=str(output_dir),
-        max_train_seqs=_env_int("WUNDER_MAX_TRAIN_SEQS", 0),
-        max_valid_seqs=_env_int("WUNDER_MAX_VALID_SEQS", 0),
-        context_len=_env_int("WUNDER_CONTEXT_LEN", 100),
-        d_model=_env_int("WUNDER_D_MODEL", 64),
-        nhead=_env_int("WUNDER_NHEAD", 8),
-        num_layers=_env_int("WUNDER_NUM_LAYERS", 3),
-        dim_feedforward=_env_int("WUNDER_DIM_FEEDFORWARD", 256),
-        dropout=_env_float("WUNDER_DROPOUT", 0.3),
-        batch_size=_env_int("WUNDER_BATCH_SIZE", 256),
-        epochs=_env_int("WUNDER_EPOCHS", 3),
-        lr=_env_float("WUNDER_LR", 2e-4),
-        weight_decay=_env_float("WUNDER_WEIGHT_DECAY", 1e-4),
-        seed=_env_int("WUNDER_SEED", 42),
-        device=_env_str("WUNDER_DEVICE", "cuda"),
-        num_workers=_env_int("WUNDER_NUM_WORKERS", 2),
-        skip_validation=_env_bool("WUNDER_SKIP_VALIDATION", True),
-        log_interval=_env_int("WUNDER_LOG_INTERVAL", 100),
-        early_stopping_patience=_env_int("WUNDER_EARLY_STOPPING_PATIENCE", 3),
-        early_stopping_min_delta=_env_float("WUNDER_EARLY_STOPPING_MIN_DELTA", 0.0),
-        hybrid_loss_alpha=_env_float("WUNDER_HYBRID_LOSS_ALPHA", 0.7),
+    cfg = _build_train_config(
+        TrainConfig=TrainConfig,
+        train_path=train_path,
+        valid_path=valid_path,
+        output_dir=output_dir,
     )
 
     train(cfg)

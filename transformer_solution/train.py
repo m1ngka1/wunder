@@ -23,28 +23,28 @@ from model import LOBTransformer
 
 @dataclass
 class TrainConfig:
-    train_path: str
-    valid_path: str
-    out_dir: str
-    max_train_seqs: int
-    max_valid_seqs: int
-    context_len: int
-    d_model: int
-    nhead: int
-    num_layers: int
-    dim_feedforward: int
-    dropout: float
-    batch_size: int
-    epochs: int
-    lr: float
-    weight_decay: float
-    seed: int
-    device: str
-    num_workers: int
-    skip_validation: bool
-    log_interval: int
-    early_stopping_patience: int
-    early_stopping_min_delta: float
+    train_path: str = "../datasets/train.parquet"
+    valid_path: str = "../datasets/valid.parquet"
+    out_dir: str = "."
+    max_train_seqs: int = 2000
+    max_valid_seqs: int = 500
+    context_len: int = 100
+    d_model: int = 64
+    nhead: int = 8
+    num_layers: int = 3
+    dim_feedforward: int = 256
+    dropout: float = 0.3
+    batch_size: int = 256
+    epochs: int = 3
+    lr: float = 2e-4
+    weight_decay: float = 1e-4
+    seed: int = 42
+    device: str = "cuda"
+    num_workers: int = 4
+    skip_validation: bool = False
+    log_interval: int = 100
+    early_stopping_patience: int = 3
+    early_stopping_min_delta: float = 0.0
     hybrid_loss_alpha: float = 0.7
 
 
