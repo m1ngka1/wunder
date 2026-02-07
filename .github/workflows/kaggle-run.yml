@@ -11,6 +11,10 @@ on:
         description: "Kaggle dataset id (e.g. mingkaijia/wunder-train-valid-parquet)"
         required: true
         default: "mingkaijia/wunder-train-valid-parquet"
+      model_dir:
+        description: "Solution folder to run (e.g. transformer_solution or lightweight_transformer_solution)"
+        required: true
+        default: "transformer_solution"
       epochs:
         description: "WUNDER_EPOCHS"
         required: true
@@ -56,6 +60,7 @@ jobs:
           KAGGLE_KERNEL_ID: ${{ github.event.inputs.kernel_id }}
           KAGGLE_DATASET: ${{ github.event.inputs.dataset_id }}
           KAGGLE_KERNEL_TITLE: Wunder Transformer GPU Train
+          MODEL_DIR: ${{ github.event.inputs.model_dir }}
           WUNDER_EPOCHS: ${{ github.event.inputs.epochs }}
           WUNDER_NHEAD: ${{ github.event.inputs.nhead }}
           WUNDER_SKIP_VALIDATION: ${{ github.event.inputs.skip_validation }}
@@ -74,4 +79,3 @@ jobs:
           KAGGLE_KERNEL_ID: ${{ github.event.inputs.kernel_id }}
         run: |
           python -m kaggle.cli kernels status "${KAGGLE_KERNEL_ID}"
-

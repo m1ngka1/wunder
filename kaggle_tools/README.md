@@ -21,6 +21,11 @@ Set these before running the scripts:
 - Optional: `WUNDER_*` environment variables can override training hyperparameters (e.g. `WUNDER_EPOCHS=12`).
 - Optional: `WUNDER_SKIP_VALIDATION=1` to skip validation during long runs (enabled by default in `kaggle_train.py`).
 
+You can also configure per-solution kernel/notebook names in `kaggle_tools/solution_kaggle_config.json`.
+If `KAGGLE_KERNEL_ID`/`KAGGLE_KERNEL_TITLE` are not set, `push_kernel.sh` and `pull_outputs.sh` will
+look up the defaults for the selected `MODEL_DIR`. Update the placeholder `username/...` entries in
+the config file to match your Kaggle account and desired kernel/notebook names.
+
 ## Upload train/valid parquet once as a Kaggle dataset
 
 To avoid re-uploading parquet files for every kernel push:
@@ -47,6 +52,9 @@ export WUNDER_EPOCHS=50
 export WUNDER_SKIP_VALIDATION=1
 ./push_kernel.sh
 ```
+
+To target the lightweight solution, set `MODEL_DIR=lightweight_transformer_solution` and either
+export a new `KAGGLE_KERNEL_ID` or update `solution_kaggle_config.json` with the kernel name.
 
 This creates a staging directory, writes `kernel-metadata.json`, and pushes the kernel to Kaggle. Kaggle will start a run automatically.
 
