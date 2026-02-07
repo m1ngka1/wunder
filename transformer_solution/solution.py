@@ -53,8 +53,8 @@ class PredictionModel:
         onnx_path = os.path.join(artifact_dir, "transformer_model.onnx")
 
         # Defaults let code run even if artifacts are missing.
-        self.context_len = 128
-        self.feature_dim = 51
+        self.context_len = 100
+        self.feature_dim = 57
         self.feature_mean = np.zeros(self.feature_dim, dtype=np.float32)
         self.feature_std = np.ones(self.feature_dim, dtype=np.float32)
         self.model = LOBTransformer(input_dim=self.feature_dim, max_len=self.context_len)
@@ -62,11 +62,11 @@ class PredictionModel:
         self.feature_engineer = FeatureEngineer()
 
         try:
-            d_model = 128
+            d_model = 64
             nhead = 8
             num_layers = 3
             dim_feedforward = 256
-            dropout = 0.1
+            dropout = 0.3
             cfg_has_feature_dim = False
 
             if os.path.exists(config_path):

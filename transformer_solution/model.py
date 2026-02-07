@@ -6,11 +6,11 @@ class LOBTransformer(nn.Module):
     def __init__(
         self,
         input_dim: int = 32,
-        d_model: int = 128,
+        d_model: int = 64,
         nhead: int = 8,
         num_layers: int = 3,
         dim_feedforward: int = 256,
-        dropout: float = 0.1,
+        dropout: float = 0.3,
         max_len: int = 256,
     ):
         super().__init__()
@@ -65,4 +65,3 @@ class LOBTransformer(nn.Module):
 
         # Predict using the last token representation.
         return self.head(h[:, -1, :])
-

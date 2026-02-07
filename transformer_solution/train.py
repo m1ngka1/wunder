@@ -45,6 +45,7 @@ class TrainConfig:
     log_interval: int
     early_stopping_patience: int
     early_stopping_min_delta: float
+    hybrid_loss_alpha: float
 
 
 class SequenceWindowDataset(Dataset):
@@ -205,7 +206,19 @@ def weighted_pearson_loss(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.T
     return -corr.mean()
 
 
-def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, use_amp: bool):
+def hybrid_loss(y_true: torch.Tensor, y_pred: torch.Tensor, alpha: float) -> torch.Tensor:
+    pearson = weighted_pearson_loss(y_true, y_pred)
+    mse = torch.mean((y_true - y_pred).pow(2), dim=0).mean()
+    return alpha * pearson + (1.0 - alpha) * mse
+
+
+def evaluate(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    use_amp: bool,
+    alpha: float,
+):
     model.eval()
     loss_sum = 0.0
     n = 0
@@ -215,7 +228,7 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, use_amp
             y = y.to(device, non_blocking=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 pred = model(x)
-                loss = weighted_pearson_loss(y, pred)
+                loss = hybrid_loss(y, pred, alpha)
             loss_sum += loss.item() * x.size(0)
             n += x.size(0)
     return loss_sum / max(n, 1)
@@ -357,7 +370,7 @@ def train(cfg: TrainConfig):
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 pred = model(x)
-                loss = weighted_pearson_loss(y, pred)
+                loss = hybrid_loss(y, pred, cfg.hybrid_loss_alpha)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -383,7 +396,7 @@ def train(cfg: TrainConfig):
             log(f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f}")
             score_to_track = train_loss
         else:
-            val_loss = evaluate(model, valid_loader, device, use_amp)
+            val_loss = evaluate(model, valid_loader, device, use_amp, cfg.hybrid_loss_alpha)
             log(
                 f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
                 f"valid_weighted_pearson_loss={val_loss:.6f}"
@@ -444,12 +457,12 @@ def parse_args():
     parser.add_argument("--out-dir", default=".")
     parser.add_argument("--max-train-seqs", type=int, default=2000)
     parser.add_argument("--max-valid-seqs", type=int, default=500)
-    parser.add_argument("--context-len", type=int, default=128)
-    parser.add_argument("--d-model", type=int, default=128)
+    parser.add_argument("--context-len", type=int, default=100)
+    parser.add_argument("--d-model", type=int, default=64)
     parser.add_argument("--nhead", type=int, default=8)
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--dim-feedforward", type=int, default=256)
-    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-4)
@@ -461,6 +474,7 @@ def parse_args():
     parser.add_argument("--log-interval", type=int, default=100)
     parser.add_argument("--early-stopping-patience", type=int, default=3)
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    parser.add_argument("--hybrid-loss-alpha", type=float, default=0.7)
     return parser.parse_args()
 
 
@@ -489,5 +503,6 @@ if __name__ == "__main__":
         log_interval=args.log_interval,
         early_stopping_patience=args.early_stopping_patience,
         early_stopping_min_delta=args.early_stopping_min_delta,
+        hybrid_loss_alpha=args.hybrid_loss_alpha,
     )
     train(config)
