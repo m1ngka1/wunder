@@ -188,14 +188,7 @@ def read_and_reshape(path: str, max_seqs: int | None = None):
     return feat, tgt
 
 
-def weighted_pearson_loss(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
-    per_target_loss, _ = weighted_pearson_per_target(y_true, y_pred)
-    return per_target_loss.mean()
-
-
-def weighted_pearson_per_target(
-    y_true: torch.Tensor, y_pred: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
+def weighted_pearson_per_target(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
     y_pred = torch.clamp(y_pred, -6.0, 6.0)
     weights = torch.abs(y_true).clamp_min(1e-8)
     sum_w = weights.sum(dim=0)
@@ -211,8 +204,7 @@ def weighted_pearson_per_target(
     var_pred = (weights * dev_pred.pow(2)).sum(dim=0) / sum_w
 
     corr = cov / (torch.sqrt(var_true) * torch.sqrt(var_pred) + 1e-8)
-    per_target_loss = -corr
-    return per_target_loss, corr
+    return -corr
 
 
 def dynamic_target_weights(
@@ -241,7 +233,6 @@ def evaluate(
     model.eval()
     loss_sum = 0.0
     loss_tgt_sum = None
-    corr_tgt_sum = None
     n = 0
     with torch.no_grad():
         for x, y in loader:
@@ -249,20 +240,17 @@ def evaluate(
             y = y.to(device, non_blocking=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 pred = model(x)
-                per_target_loss, per_target_corr = weighted_pearson_per_target(y, pred)
+                per_target_loss = weighted_pearson_per_target(y, pred)
                 loss = per_target_loss.mean()
             loss_sum += loss.item() * x.size(0)
             if loss_tgt_sum is None:
                 loss_tgt_sum = torch.zeros_like(per_target_loss)
-                corr_tgt_sum = torch.zeros_like(per_target_corr)
-            loss_tgt_sum += per_target_loss.detach().cpu() * x.size(0)
-            corr_tgt_sum += per_target_corr.detach().cpu() * x.size(0)
+            loss_tgt_sum += per_target_loss.detach() * x.size(0)
             n += x.size(0)
     n = max(n, 1)
     return {
         "loss": loss_sum / n,
-        "loss_per_target": (loss_tgt_sum / n).tolist(),
-        "corr_per_target": (corr_tgt_sum / n).tolist(),
+        "loss_per_target": ((loss_tgt_sum / n).detach().cpu().tolist()),
     }
 
 
@@ -365,13 +353,9 @@ def train(cfg: TrainConfig):
         "train_loss": [],
         "train_loss_t0": [],
         "train_loss_t1": [],
-        "train_corr_t0": [],
-        "train_corr_t1": [],
         "valid_loss": [],
         "valid_loss_t0": [],
         "valid_loss_t1": [],
-        "valid_corr_t0": [],
-        "valid_corr_t1": [],
         "target_weight_t0": [],
         "target_weight_t1": [],
         "lr": [],
@@ -386,7 +370,6 @@ def train(cfg: TrainConfig):
         model.train()
         running = 0.0
         running_loss_tgt = torch.zeros(2)
-        running_corr_tgt = torch.zeros(2)
         seen = 0
         pbar = tqdm(
             enumerate(train_loader, start=1),
@@ -403,7 +386,7 @@ def train(cfg: TrainConfig):
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 pred = model(x)
-                per_target_loss, per_target_corr = weighted_pearson_per_target(y, pred)
+                per_target_loss = weighted_pearson_per_target(y, pred)
                 cur_weights = target_weights.to(device)
                 loss = torch.sum(cur_weights * per_target_loss)
 
@@ -415,7 +398,6 @@ def train(cfg: TrainConfig):
 
             running += loss.item() * x.size(0)
             running_loss_tgt += per_target_loss.detach().cpu() * x.size(0)
-            running_corr_tgt += per_target_corr.detach().cpu() * x.size(0)
             seen += x.size(0)
             with torch.no_grad():
                 batch_weights = dynamic_target_weights(
@@ -432,13 +414,12 @@ def train(cfg: TrainConfig):
             if step % max(cfg.log_interval, 1) == 0 or step == len(train_loader):
                 avg_loss = running / max(seen, 1)
                 avg_loss_tgt = running_loss_tgt / max(seen, 1)
-                avg_corr_tgt = running_corr_tgt / max(seen, 1)
                 if use_tqdm:
                     pbar.set_postfix(
                         {
                             "train_loss": f"{avg_loss:.6f}",
-                            "t0": f"{avg_corr_tgt[0].item():.4f}",
-                            "t1": f"{avg_corr_tgt[1].item():.4f}",
+                            "t0_loss": f"{avg_loss_tgt[0].item():.4f}",
+                            "t1_loss": f"{avg_loss_tgt[1].item():.4f}",
                             "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
                         }
                     )
@@ -446,7 +427,6 @@ def train(cfg: TrainConfig):
                     f"epoch={epoch:02d} step={step}/{len(train_loader)} "
                     f"train_loss={avg_loss:.6f} "
                     f"train_t0_loss={avg_loss_tgt[0].item():.6f} train_t1_loss={avg_loss_tgt[1].item():.6f} "
-                    f"train_t0_corr={avg_corr_tgt[0].item():.6f} train_t1_corr={avg_corr_tgt[1].item():.6f} "
                     f"w_t0={target_weights[0].item():.3f} w_t1={target_weights[1].item():.3f} "
                     f"lr={optimizer.param_groups[0]['lr']:.3e}"
                 )
@@ -454,27 +434,22 @@ def train(cfg: TrainConfig):
         scheduler.step()
         train_loss = running / max(seen, 1)
         train_loss_tgt = running_loss_tgt / max(seen, 1)
-        train_corr_tgt = running_corr_tgt / max(seen, 1)
         if cfg.skip_validation:
             val_result = None
             log(
                 f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
-                f"train_t0_loss={train_loss_tgt[0].item():.6f} train_t1_loss={train_loss_tgt[1].item():.6f} "
-                f"train_t0_corr={train_corr_tgt[0].item():.6f} train_t1_corr={train_corr_tgt[1].item():.6f}"
+                f"train_t0_loss={train_loss_tgt[0].item():.6f} train_t1_loss={train_loss_tgt[1].item():.6f}"
             )
             score_to_track = train_loss
         else:
             val_result = evaluate(model, valid_loader, device, use_amp)
             val_loss = val_result["loss"]
             vlt = val_result["loss_per_target"]
-            vct = val_result["corr_per_target"]
             log(
                 f"epoch={epoch:02d} train_weighted_pearson_loss={train_loss:.6f} "
                 f"train_t0_loss={train_loss_tgt[0].item():.6f} train_t1_loss={train_loss_tgt[1].item():.6f} "
-                f"train_t0_corr={train_corr_tgt[0].item():.6f} train_t1_corr={train_corr_tgt[1].item():.6f} "
                 f"valid_weighted_pearson_loss={val_loss:.6f} "
-                f"valid_t0_loss={vlt[0]:.6f} valid_t1_loss={vlt[1]:.6f} "
-                f"valid_t0_corr={vct[0]:.6f} valid_t1_corr={vct[1]:.6f}"
+                f"valid_t0_loss={vlt[0]:.6f} valid_t1_loss={vlt[1]:.6f}"
             )
             score_to_track = val_loss
 
@@ -482,13 +457,9 @@ def train(cfg: TrainConfig):
         history["train_loss"].append(float(train_loss))
         history["train_loss_t0"].append(float(train_loss_tgt[0].item()))
         history["train_loss_t1"].append(float(train_loss_tgt[1].item()))
-        history["train_corr_t0"].append(float(train_corr_tgt[0].item()))
-        history["train_corr_t1"].append(float(train_corr_tgt[1].item()))
         history["valid_loss"].append(None if val_result is None else float(val_result["loss"]))
         history["valid_loss_t0"].append(None if val_result is None else float(val_result["loss_per_target"][0]))
         history["valid_loss_t1"].append(None if val_result is None else float(val_result["loss_per_target"][1]))
-        history["valid_corr_t0"].append(None if val_result is None else float(val_result["corr_per_target"][0]))
-        history["valid_corr_t1"].append(None if val_result is None else float(val_result["corr_per_target"][1]))
         history["target_weight_t0"].append(float(target_weights[0].item()))
         history["target_weight_t1"].append(float(target_weights[1].item()))
         history["lr"].append(float(optimizer.param_groups[0]["lr"]))
