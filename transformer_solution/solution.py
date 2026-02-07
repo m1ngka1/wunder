@@ -4,6 +4,10 @@ from collections import deque
 
 import numpy as np
 import torch
+try:
+    import onnxruntime as ort
+except Exception:
+    ort = None
 
 # Adjust path to import utils from parent directory
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +34,9 @@ class PredictionModel:
         self.current_seq_ix = None
         self.device = torch.device("cpu")
         self._loaded = False
+        self._use_onnx = False
+        self._ort_session = None
+        self._ort_input_name = None
 
         if model_path:
             artifact_dir = model_path
@@ -39,6 +46,7 @@ class PredictionModel:
         config_path = os.path.join(artifact_dir, "config.npz")
         stats_path = os.path.join(artifact_dir, "feature_stats.npz")
         ckpt_path = os.path.join(artifact_dir, "transformer_model.pt")
+        onnx_path = os.path.join(artifact_dir, "transformer_model.onnx")
 
         # Defaults let code run even if artifacts are missing.
         self.context_len = 128
@@ -97,20 +105,68 @@ class PredictionModel:
                 state_dict = torch.load(ckpt_path, map_location="cpu")
                 self.model.load_state_dict(state_dict, strict=True)
                 self._loaded = True
+                self._init_onnx_runtime(ckpt_path=ckpt_path, onnx_path=onnx_path)
         except Exception as exc:
             print(f"[WARN] Failed to load transformer artifacts: {exc}")
             self._loaded = False
+
+    def _export_onnx_if_needed(self, ckpt_path: str, onnx_path: str):
+        if ort is None:
+            return
+        needs_export = True
+        if os.path.exists(onnx_path):
+            needs_export = os.path.getmtime(onnx_path) < os.path.getmtime(ckpt_path)
+        if not needs_export:
+            return
+
+        self.model.eval()
+        dummy_input = torch.zeros(
+            1, self.context_len, self.feature_dim, dtype=torch.float32, device=self.device
+        )
+        torch.onnx.export(
+            self.model,
+            dummy_input,
+            onnx_path,
+            input_names=["x"],
+            output_names=["y"],
+            opset_version=17,
+            do_constant_folding=True,
+        )
+
+    def _init_onnx_runtime(self, ckpt_path: str, onnx_path: str):
+        if ort is None:
+            return
+        try:
+            self._export_onnx_if_needed(ckpt_path=ckpt_path, onnx_path=onnx_path)
+            if not os.path.exists(onnx_path):
+                return
+            sess_options = ort.SessionOptions()
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            self._ort_session = ort.InferenceSession(
+                onnx_path, sess_options=sess_options, providers=["CPUExecutionProvider"]
+            )
+            self._ort_input_name = self._ort_session.get_inputs()[0].name
+            self._use_onnx = True
+            print(f"[INFO] Using ONNX Runtime with {onnx_path}")
+        except Exception as exc:
+            print(f"[WARN] ONNX runtime init failed, fallback to torch: {exc}")
+            self._use_onnx = False
+            self._ort_session = None
+            self._ort_input_name = None
 
     def _reset_sequence(self, seq_ix: int):
         self.current_seq_ix = seq_ix
         self.history.clear()
         self.feature_engineer.reset()
 
-    def _prepare_model_input(self) -> torch.Tensor:
-        window = np.asarray(self.history, dtype=np.float32)
+    def _prepare_model_input_np(self) -> np.ndarray:
+        window = np.zeros((self.context_len, self.feature_dim), dtype=np.float32)
+        if len(self.history) > 0:
+            hist_arr = np.asarray(self.history, dtype=np.float32)
+            use_len = min(hist_arr.shape[0], self.context_len)
+            window[-use_len:] = hist_arr[-use_len:]
         window = (window - self.feature_mean) / self.feature_std
-        tensor = torch.from_numpy(window).unsqueeze(0).to(self.device)
-        return tensor
+        return window
 
     def predict(self, data_point: DataPoint) -> np.ndarray | None:
         if self.current_seq_ix != data_point.seq_ix:
@@ -125,10 +181,16 @@ class PredictionModel:
         if not self._loaded:
             return np.zeros(2, dtype=np.float32)
 
+        x_np = self._prepare_model_input_np()[None, ...]  # [1, context_len, feature_dim]
+
+        if self._use_onnx and self._ort_session is not None and self._ort_input_name is not None:
+            pred = self._ort_session.run(None, {self._ort_input_name: x_np})[0][0]
+            return pred.astype(np.float32)
+
         with torch.no_grad():
-            x = self._prepare_model_input()
+            x = torch.from_numpy(x_np).to(self.device)
             pred = self.model(x).cpu().numpy()[0]
-        return pred.astype(np.float32)
+            return pred.astype(np.float32)
 
 
 if __name__ == "__main__":
