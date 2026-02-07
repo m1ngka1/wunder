@@ -9,6 +9,7 @@ CURRENT_DIR = Path(__file__).resolve().parent
 WORK_ROOT = Path("/kaggle/working/wunder_kernel_src")
 PROJECT_ROOT = WORK_ROOT
 EMBEDDED_FILES = {}
+EMBEDDED_FILE_LIST = []
 DEFAULT_DATA_DIR = ""
 DEFAULT_ENV_OVERRIDES = {}
 
@@ -116,11 +117,15 @@ def main() -> None:
         if not src.exists():
             raise FileNotFoundError(f"Missing artifact {src}")
 
-    for filename in [
+    default_files = [
         "solution.py",
         "model.py",
         "feature_engineering.py",
-    ]:
+    ]
+    project_files = EMBEDDED_FILE_LIST or [
+        filename for filename in default_files if (PROJECT_ROOT / filename).exists()
+    ]
+    for filename in project_files:
         shutil.copy2(PROJECT_ROOT / filename, output_dir / filename)
 
     utils_path = PROJECT_ROOT / "utils.py"
@@ -129,11 +134,7 @@ def main() -> None:
 
     solution_zip = artifact_dir / "solution.zip"
     with zipfile.ZipFile(solution_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for filename in [
-            "solution.py",
-            "model.py",
-            "feature_engineering.py",
-        ]:
+        for filename in project_files:
             archive.write(output_dir / filename, arcname=filename)
         for filename in [
             "transformer_model.pt",

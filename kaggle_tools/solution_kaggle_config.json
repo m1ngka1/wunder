@@ -1,0 +1,14 @@
+{
+  "transformer_solution": {
+    "kernel_id": "username/wunder-transformer-train",
+    "kernel_title": "Wunder Transformer GPU Train",
+    "notebook_id": "username/wunder-transformer-notebook",
+    "notebook_title": "Wunder Transformer Notebook"
+  },
+  "lightweight_transformer_solution": {
+    "kernel_id": "username/wunder-lightweight-transformer-train",
+    "kernel_title": "Wunder Lightweight Transformer GPU Train",
+    "notebook_id": "username/wunder-lightweight-transformer-notebook",
+    "notebook_title": "Wunder Lightweight Transformer Notebook"
+  }
+}
