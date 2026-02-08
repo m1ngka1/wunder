@@ -78,7 +78,7 @@ if [[ -f "${PROJECT_ROOT}/feature_engineering.py" ]]; then
   cp "${PROJECT_ROOT}/feature_engineering.py" "${STAGING_DIR}/feature_engineering.py"
 fi
 
-python - <<'PY'
+"${KAGGLE_PYTHON_BIN}" - <<'PY'
 import json
 import os
 from pathlib import Path

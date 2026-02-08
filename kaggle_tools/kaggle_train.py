@@ -141,16 +141,21 @@ def main() -> None:
         if not src.exists():
             raise FileNotFoundError(f"Missing artifact {src}")
 
-    default_files = [
-        "solution.py",
-        "model.py",
-        "feature_engineering.py",
-    ]
-    project_files = EMBEDDED_FILE_LIST or [
-        filename for filename in default_files if (PROJECT_ROOT / filename).exists()
-    ]
+    if EMBEDDED_FILE_LIST:
+        project_files = list(EMBEDDED_FILE_LIST)
+    else:
+        project_files = [
+            filename
+            for filename in ("solution.py", "model.py", "feature_engineering.py")
+            if filename in EMBEDDED_FILES
+        ]
+    if not project_files:
+        raise RuntimeError("No embedded project files were provided for packaging.")
     for filename in project_files:
-        shutil.copy2(PROJECT_ROOT / filename, output_dir / filename)
+        src_path = PROJECT_ROOT / filename
+        if not src_path.exists():
+            raise FileNotFoundError(f"Missing embedded project file at runtime: {src_path}")
+        shutil.copy2(src_path, output_dir / filename)
 
     utils_path = PROJECT_ROOT / "utils.py"
     if utils_path.exists():

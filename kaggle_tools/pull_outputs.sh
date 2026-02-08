@@ -45,12 +45,39 @@ kaggle_cli() {
 
 mkdir -p "${OUTPUT_DIR}"
 
-kaggle_cli kernels output "${KAGGLE_KERNEL_ID}" -p "${OUTPUT_DIR}"
+# Pull into a temporary directory to avoid stale files from previous runs.
+TMP_PULL_DIR="$(mktemp -d "${OUTPUT_DIR}/tmp_pull.XXXXXX")"
+cleanup_tmp() {
+  rm -rf "${TMP_PULL_DIR}"
+}
+trap cleanup_tmp EXIT
+
+kaggle_cli kernels output "${KAGGLE_KERNEL_ID}" -p "${TMP_PULL_DIR}"
+
+# Kaggle may emit:
+# - TMP_PULL_DIR/outputs/<files>
+# - TMP_PULL_DIR/<files>
+# - TMP_PULL_DIR/<single-subdir>/<files>
+RAW_PULL_DIR="${TMP_PULL_DIR}"
+if [[ -d "${TMP_PULL_DIR}/outputs" ]]; then
+  RAW_PULL_DIR="${TMP_PULL_DIR}/outputs"
+fi
+if [[ -z "$(find "${RAW_PULL_DIR}" -maxdepth 1 -type f -print -quit)" ]]; then
+  mapfile -t RAW_SUBDIRS < <(find "${RAW_PULL_DIR}" -mindepth 1 -maxdepth 1 -type d)
+  if [[ "${#RAW_SUBDIRS[@]}" -eq 1 ]]; then
+    RAW_PULL_DIR="${RAW_SUBDIRS[0]}"
+  fi
+fi
+
+# Normalize into OUTPUT_DIR/outputs so consumers always read a fresh location.
+rm -rf "${OUTPUT_DIR}/outputs"
+mkdir -p "${OUTPUT_DIR}/outputs"
+rsync -a "${RAW_PULL_DIR}/" "${OUTPUT_DIR}/outputs/"
 
 # Kaggle may place files directly under OUTPUT_DIR or under OUTPUT_DIR/outputs.
-PULLED_DIR="${OUTPUT_DIR}"
-if [[ -d "${OUTPUT_DIR}/outputs" ]]; then
-  PULLED_DIR="${OUTPUT_DIR}/outputs"
+PULLED_DIR="${OUTPUT_DIR}/outputs"
+if [[ -z "$(find "${PULLED_DIR}" -maxdepth 1 -type f -print -quit)" && -z "$(find "${PULLED_DIR}" -maxdepth 1 -type d -print -quit)" ]]; then
+  echo "Warning: Kaggle returned no output files for ${KAGGLE_KERNEL_ID}." >&2
 fi
 
 ARTIFACT_SOURCE="${PULLED_DIR}"
