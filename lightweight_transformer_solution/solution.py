@@ -16,6 +16,7 @@ if CURRENT_DIR not in sys.path:
 
 from utils import DataPoint  # noqa: E402
 from model import LightweightLOBTransformer  # noqa: E402
+from utils import DataPoint, ScorerStepByStep  # noqa: E402
 
 
 class PredictionModel:
@@ -211,3 +212,20 @@ class PredictionModel:
             x = torch.from_numpy(x_np).to(self.device)
             pred = self.model(x).cpu().numpy()[0]
             return pred.astype(np.float32)
+
+
+if __name__ == "__main__":
+    # Local testing
+    test_file = f"{CURRENT_DIR}/../datasets/valid.parquet"
+
+    if os.path.exists(test_file):
+        model = PredictionModel()
+        scorer = ScorerStepByStep(test_file)
+        print("Testing Transformer solution...")
+        results = scorer.score(model)
+        print("\nResults:")
+        print(f"Mean Weighted Pearson correlation: {results['weighted_pearson']:.6f}")
+        for target in scorer.targets:
+            print(f"  {target}: {results[target]:.6f}")
+    else:
+        print("Valid parquet not found for testing.")
