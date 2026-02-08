@@ -63,9 +63,9 @@ if [[ -d "${TMP_PULL_DIR}/outputs" ]]; then
   RAW_PULL_DIR="${TMP_PULL_DIR}/outputs"
 fi
 if [[ -z "$(find "${RAW_PULL_DIR}" -maxdepth 1 -type f -print -quit)" ]]; then
-  mapfile -t RAW_SUBDIRS < <(find "${RAW_PULL_DIR}" -mindepth 1 -maxdepth 1 -type d)
-  if [[ "${#RAW_SUBDIRS[@]}" -eq 1 ]]; then
-    RAW_PULL_DIR="${RAW_SUBDIRS[0]}"
+  RAW_SUBDIR_COUNT="$(find "${RAW_PULL_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+  if [[ "${RAW_SUBDIR_COUNT}" -eq 1 ]]; then
+    RAW_PULL_DIR="$(find "${RAW_PULL_DIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
   fi
 fi
 
@@ -84,6 +84,65 @@ ARTIFACT_SOURCE="${PULLED_DIR}"
 if [[ -d "${PULLED_DIR}/artifacts" ]]; then
   ARTIFACT_SOURCE="${PULLED_DIR}/artifacts"
 fi
+
+# Rebuild submission zip locally from pulled outputs.
+PROJECT_SOURCE_DIR="${PULLED_DIR}"
+if [[ -d "${PULLED_DIR}/wunder_kernel_src" ]]; then
+  PROJECT_SOURCE_DIR="${PULLED_DIR}/wunder_kernel_src"
+elif [[ -d "${TMP_PULL_DIR}/wunder_kernel_src" ]]; then
+  PROJECT_SOURCE_DIR="${TMP_PULL_DIR}/wunder_kernel_src"
+fi
+export ARTIFACT_SOURCE
+export PULLED_DIR
+export PROJECT_SOURCE_DIR
+"${KAGGLE_PYTHON_BIN}" - <<'PY'
+import os
+import zipfile
+from pathlib import Path
+
+artifact_source = Path(os.environ["ARTIFACT_SOURCE"])
+pulled_dir = Path(os.environ["PULLED_DIR"])
+project_source_dir = Path(os.environ["PROJECT_SOURCE_DIR"])
+solution_zip = artifact_source / "solution.zip"
+
+def pick_source(filename: str):
+    for base in (pulled_dir, project_source_dir, artifact_source):
+        path = base / filename
+        if path.exists():
+            return path
+    return None
+
+project_files = []
+project_paths = {}
+for filename in ("solution.py", "model.py", "feature_engineering.py"):
+    src = pick_source(filename)
+    if src:
+        project_files.append(filename)
+        project_paths[filename] = src
+
+if not project_files:
+    print("Warning: no project source files found; skipping local solution.zip build.")
+    raise SystemExit(0)
+
+artifact_members = []
+for filename in ("transformer_model.pt", "feature_stats.npz", "config.npz", "train_config.json"):
+    src = (artifact_source / filename)
+    if src.exists():
+        artifact_members.append((src, f"artifacts/{filename}"))
+
+utils_src = pick_source("utils.py")
+
+solution_zip.parent.mkdir(parents=True, exist_ok=True)
+with zipfile.ZipFile(solution_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    for filename in project_files:
+        archive.write(project_paths[filename], arcname=filename)
+    for src, arcname in artifact_members:
+        archive.write(src, arcname=arcname)
+    if utils_src:
+        archive.write(utils_src, arcname="utils.py")
+
+print(f"Built local solution zip: {solution_zip}")
+PY
 
 if [[ -n "${WUNDER_SYNC_DIR:-}" ]]; then
   echo "Syncing artifacts into ${WUNDER_SYNC_DIR}"

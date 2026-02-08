@@ -2,7 +2,6 @@ import json
 import os
 import shutil
 import sys
-import zipfile
 import inspect
 from pathlib import Path
 
@@ -161,24 +160,9 @@ def main() -> None:
     if utils_path.exists():
         shutil.copy2(utils_path, output_dir / "utils.py")
 
-    solution_zip = artifact_dir / "solution.zip"
-    with zipfile.ZipFile(solution_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for filename in project_files:
-            archive.write(output_dir / filename, arcname=filename)
-        for filename in [
-            "transformer_model.pt",
-            "feature_stats.npz",
-            "config.npz",
-            "train_config.json",
-        ]:
-            archive.write(artifact_dir / filename, arcname=f"artifacts/{filename}")
-        if (output_dir / "utils.py").exists():
-            archive.write(output_dir / "utils.py", arcname="utils.py")
-
     report = {
         "output_dir": str(output_dir),
         "artifact_dir": str(artifact_dir),
-        "solution_zip": str(solution_zip),
         "train_path": str(train_path),
         "valid_path": str(valid_path),
     }
